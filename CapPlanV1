@@ -1,0 +1,87 @@
+SELECT DISTINCT tot.category
+              ,tot.POGCount
+              ,tot.Categorytime
+              ,ROUND((tot.Categorytime/360),2) WorkingDays
+              ,ROUND((tot.Categorytime/1800),2) Weeks
+FROM (SELECT 
+fin.*
+,CASE 
+      
+      WHEN fin.UniquePogClass = 1 THEN fin.TimetakenforPOG
+      WHEN fin.UniquePogClass = 2 THEN fin.TimetakenforPOG/2
+      WHEN fin.UniquePogClass = 3 THEN (CASE WHEN fin.ClusUniquerank > 1 THEN 10 ELSE 20 END)
+      WHEN fin.UniquePogClass = 4 THEN 10
+      ELSE fin.TimetakenforPOG  
+      END AS CalcTime
+,((SUM( CASE 
+      WHEN fin.UniquePogClass = 1 THEN fin.TimetakenforPOG
+      WHEN fin.UniquePogClass = 2 THEN fin.TimetakenforPOG/2
+      WHEN fin.UniquePogClass = 3 THEN (CASE WHEN fin.ClusUniquerank > 1 THEN 10 ELSE 20 END)
+      WHEN fin.UniquePogClass = 4 THEN 10
+      ELSE fin.TimetakenforPOG  
+      END
+      ) OVER ( PARTITION BY fin.category ORDER BY fin.category))+480) Categorytime
+
+
+FROM (
+      SELECT 
+      sub.category
+      ,sub.dbkey
+      ,sub."Size"
+      ,sub.eq
+      ,sub.ClusterDesc
+      ,sub.VariationDesc
+      ,sub.NonVisualFlag
+      ,sub.POGCount
+      ,sub.totprod
+      ,sub.CountofSTores
+      ,sub.Uniquecluster
+      ,RANK() OVER (PARTITION BY sub.Uniquecluster ORDER BY sub.CountofSTores DESC) ClusUniquerank
+      ,RANK() OVER ( PARTITION BY sub.category ORDER BY sub.CountofSTores DESC) Rankid
+      ,SUM(sub.CountofSTores) OVER (PARTITION BY sub.category ORDER BY sub.category rows between unbounded preceding and current row) CSum
+      ,ROUND((sub.CountofSTores/SUM(sub.CountofSTores) OVER (PARTITION BY sub.category ORDER BY sub.category))*100,2) POgStoreshare
+      ,SUM(sub.CountofSTores) OVER (PARTITION BY sub.category ORDER BY sub.category) TotStCount
+      ,ROUND((SUM(sub.CountofSTores) OVER (PARTITION BY sub.category ORDER BY sub.category rows between unbounded preceding and current row)/SUM(sub.CountofSTores) OVER (PARTITION BY sub.category ORDER BY sub.category))*100,2) Csumshare
+      ,CASE       WHEN (RANK() OVER (PARTITION BY sub.Uniquecluster ORDER BY sub.CountofSTores DESC)) = 1 THEN 1  
+                  WHEN (ROUND((sub.CountofSTores/SUM(sub.CountofSTores) OVER (PARTITION BY sub.category ORDER BY sub.category))*100,2)) > 20 THEN 2
+                  WHEN sub.CountofSTores = 1 THEN 3
+                  ELSE 4 END AS UniquePogClass
+      ,sub.Timetakenforprod
+      ,sub.TimetakenforPOG
+      FROM (
+            SELECT   
+            pog.category
+            ,pog.dbkey
+            ,pog.numberofsegments "Size"
+            ,pog.DESC5 eq
+            ,pog.desc8 ClusterDesc
+            ,pog.desc6 VariationDesc
+            ,pog.flag3 NonVisualFlag
+            ,pog.NUMBEROFPRODUCTSALLOCATED totprod
+            ,pog.category||to_char(pog.numberofsegments)||pog.DESC5||pog.desc8 AS Uniquecluster
+            ,count(DISTINCT pog.dbkey) OVER (PARTITION BY pog.category)POGCount
+            ,COUNT( DISTINCT flr.value1)CountofSTores
+            ,(CASE WHEN pog.desc5 LIKE 'COF%' THEN pog.NUMBEROFPRODUCTSALLOCATED*1 ELSE pog.NUMBEROFPRODUCTSALLOCATED*0.5 END) AS Timetakenforprod
+            ,(CASE WHEN pog.flag3 = 1 THEN 15 ELSE ((1*pog.numberofsegments)+3+(3*pog.numberofsegments)+30+(CASE WHEN pog.desc5 LIKE 'COF%' THEN pog.NUMBEROFPRODUCTSALLOCATED*1 ELSE pog.NUMBEROFPRODUCTSALLOCATED*0.5 END))END) AS  TimetakenforPOG
+            from tcr_ikb.ix_spc_planogram pog 
+            inner join tcr_ikb.ix_flr_section sec ON (pog.dbkey = sec.dbparentplanogramkey)
+            inner join tcr_ikb.ix_flr_floorplan flr ON (flr.dbkey = sec.dbparentfloorplankey)
+            WHERE flr.desc11 = '1005 - Woolworths Smkt'
+            and pog.desc2 = '1005 - Woolworths Smkt'
+            and pog.dbstatus = 1 
+            and flr.dbstatus = 1 
+            and pog.PGTYPE = 0
+            and pog.department <>'Supermarket Liquor'
+            and pog.department <>'Small Store Smkts'
+            and pog.department <>'NON VISUAL'
+            and pog.department <>'SUPERMARKET LIQUOR'
+            and pog.department <>'BWS' 
+            and pog.category NOT IN ('EVENTS PRE - RANGING','RFP - DELI SEASONAL','RFP - SEAFOOD BTC','SEAFOOD RFP - FROZEN')
+            
+            --and pog.category = 'AIRCARE'
+            GROUP BY  pog.category,pog.dbkey,pog.desc8,pog.numberofsegments,pog.desc5,pog.desc6,pog.flag3,pog.NUMBEROFPRODUCTSALLOCATED
+            ORDER BY 1, 7 DESC
+            
+      )sub 
+)fin)tot
+ORDER BY  3 desc;
